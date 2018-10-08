@@ -1,11 +1,27 @@
 package info.nightscout.androidaps.plugins.NSClientInternal.data;
 
+import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.os.Bundle;
 import android.support.annotation.Nullable;
 
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Date;
+import java.util.Objects;
+
+import info.nightscout.androidaps.Config;
+import info.nightscout.androidaps.MainApp;
+import info.nightscout.androidaps.R;
+import info.nightscout.androidaps.logging.L;
+import info.nightscout.androidaps.plugins.Overview.OverviewPlugin;
+import info.nightscout.androidaps.plugins.Overview.events.EventDismissNotification;
+import info.nightscout.androidaps.plugins.Overview.events.EventNewNotification;
+import info.nightscout.androidaps.plugins.Overview.notifications.Notification;
+import info.nightscout.androidaps.logging.BundleLogger;
 
 /*
  {
@@ -98,6 +114,8 @@ import java.util.Date;
  }
  */
 public class NSSettingsStatus {
+    private Logger log = LoggerFactory.getLogger(L.NSCLIENT);
+
     private static NSSettingsStatus instance = null;
 
     public static NSSettingsStatus getInstance() {
@@ -105,6 +123,8 @@ public class NSSettingsStatus {
             instance = new NSSettingsStatus();
         return instance;
     }
+
+    public String nightscoutVersionName = "";
 
     private JSONObject data = null;
 
@@ -114,6 +134,59 @@ public class NSSettingsStatus {
     public NSSettingsStatus setData(JSONObject obj) {
         this.data = obj;
         return this;
+    }
+
+    public void handleNewData(Intent intent) {
+        Bundle bundle = intent.getExtras();
+        if (bundle == null) return;
+
+        if (L.isEnabled(L.NSCLIENT))
+            log.debug("Got NS status: " + BundleLogger.log(bundle));
+
+        if (bundle.containsKey("nsclientversioncode")) {
+
+            Integer nightscoutVersionCode = bundle.getInt("nightscoutversioncode");
+            nightscoutVersionName = bundle.getString("nightscoutversionname");
+            Integer nsClientVersionCode = bundle.getInt("nsclientversioncode");
+            String nsClientVersionName = bundle.getString("nsclientversionname");
+            if (L.isEnabled(L.NSCLIENT))
+                log.debug("Got versions: NSClient: " + nsClientVersionName + " Nightscout: " + nightscoutVersionName);
+            try {
+                if (nsClientVersionCode < MainApp.instance().getPackageManager().getPackageInfo(MainApp.instance().getPackageName(), 0).versionCode) {
+                    Notification notification = new Notification(Notification.OLD_NSCLIENT, MainApp.gs(R.string.unsupportedclientver), Notification.URGENT);
+                    MainApp.bus().post(new EventNewNotification(notification));
+                } else {
+                    MainApp.bus().post(new EventDismissNotification(Notification.OLD_NSCLIENT));
+                }
+            } catch (PackageManager.NameNotFoundException e) {
+                log.error("Unhandled exception", e);
+            }
+            if (nightscoutVersionCode < Config.SUPPORTEDNSVERSION) {
+                Notification notification = new Notification(Notification.OLD_NS, MainApp.gs(R.string.unsupportednsversion), Notification.NORMAL);
+                MainApp.bus().post(new EventNewNotification(notification));
+            } else {
+                MainApp.bus().post(new EventDismissNotification(Notification.OLD_NS));
+            }
+        } else {
+            Notification notification = new Notification(Notification.OLD_NSCLIENT, MainApp.gs(R.string.unsupportedclientver), Notification.URGENT);
+            MainApp.bus().post(new EventNewNotification(notification));
+        }
+        if (bundle.containsKey("status")) {
+            try {
+                JSONObject statusJson = new JSONObject(bundle.getString("status"));
+                setData(statusJson);
+                if (L.isEnabled(L.NSCLIENT))
+                    log.debug("Received status: " + statusJson.toString());
+                Double targetHigh = getThreshold("bgTargetTop");
+                Double targetlow = getThreshold("bgTargetBottom");
+                if (targetHigh != null)
+                    OverviewPlugin.bgTargetHigh = targetHigh;
+                if (targetlow != null)
+                    OverviewPlugin.bgTargetLow = targetlow;
+            } catch (JSONException e) {
+                log.error("Unhandled exception", e);
+            }
+        }
     }
 
     public String getName() {
@@ -129,7 +202,7 @@ public class NSSettingsStatus {
     }
 
     public Date getServerTime() {
-        return getDateOrNull("versionNum");
+        return getDateOrNull("serverTime");
     }
 
     public boolean getApiEnabled() {
@@ -159,10 +232,23 @@ public class NSSettingsStatus {
                 return new JSONObject(extended);
 
         } catch (JSONException e) {
-            e.printStackTrace();
+            log.error("Unhandled exception", e);
         }
         return null;
 
+    }
+
+    // valid property is "warn" or "urgent"
+    // plugings "iage" "sage" "cage" "pbage"
+
+    public double getExtendedWarnValue(String plugin, String property, double defaultvalue) {
+        JSONObject extendedSettings = this.getExtendedSettings();
+        if (extendedSettings == null)
+            return defaultvalue;
+        JSONObject pluginJson = extendedSettings.optJSONObject(plugin);
+        if (pluginJson == null)
+            return defaultvalue;
+        return pluginJson.optDouble(property, defaultvalue);
     }
 
     public String getActiveProfile() {
@@ -184,30 +270,31 @@ public class NSSettingsStatus {
                 if (settingsO.has("thresholds")) {
                     JSONObject tObject = settingsO.getJSONObject("thresholds");
                     if (tObject.has(what)) {
-                        Double result = tObject.getDouble(what);
-                        return result;
+                        return tObject.getDouble(what);
                     }
+                }
+                if (settingsO.has("alarmTimeagoWarnMins") && Objects.equals(what, "alarmTimeagoWarnMins")) {
+                    return settingsO.getDouble(what);
                 }
             }
         } catch (JSONException e) {
-            e.printStackTrace();
+            log.error("Unhandled exception", e);
         }
         return null;
     }
 
     private String getStringOrNull(String key) {
         String ret = null;
+        if (data == null) return null;
         if (data.has(key)) {
             try {
                 ret = data.getString(key);
             } catch (JSONException e) {
-                e.printStackTrace();
+                log.error("Unhandled exception", e);
             }
         }
         return ret;
     }
-
-    ;
 
     private Integer getIntegerOrNull(String key) {
         Integer ret = null;
@@ -215,13 +302,11 @@ public class NSSettingsStatus {
             try {
                 ret = data.getInt(key);
             } catch (JSONException e) {
-                e.printStackTrace();
+                log.error("Unhandled exception", e);
             }
         }
         return ret;
     }
-
-    ;
 
     private Long getLongOrNull(String key) {
         Long ret = null;
@@ -229,13 +314,11 @@ public class NSSettingsStatus {
             try {
                 ret = data.getLong(key);
             } catch (JSONException e) {
-                e.printStackTrace();
+                log.error("Unhandled exception", e);
             }
         }
         return ret;
     }
-
-    ;
 
     private Date getDateOrNull(String key) {
         Date ret = null;
@@ -243,13 +326,11 @@ public class NSSettingsStatus {
             try {
                 ret = new Date(data.getString(key));
             } catch (JSONException e) {
-                e.printStackTrace();
+                log.error("Unhandled exception", e);
             }
         }
         return ret;
     }
-
-    ;
 
     private boolean getBooleanOrNull(String key) {
         boolean ret = false;
@@ -257,7 +338,7 @@ public class NSSettingsStatus {
             try {
                 ret = data.getBoolean(key);
             } catch (JSONException e) {
-                e.printStackTrace();
+                log.error("Unhandled exception", e);
             }
         }
         return ret;
@@ -279,7 +360,6 @@ public class NSSettingsStatus {
       , warnBattP: sbx.extendedSettings.warnBattP || 30
       , urgentBattP: sbx.extendedSettings.urgentBattP || 20
       , enableAlerts: sbx.extendedSettings.enableAlerts || false
-
      */
 
     public double extendedPumpSettings(String setting) {
@@ -287,38 +367,40 @@ public class NSSettingsStatus {
             JSONObject pump = extentendedPumpSettings();
             switch (setting) {
                 case "warnClock":
-                    return pump != null  && pump.has(setting) ? pump.getDouble(setting) : 30;
+                    return pump != null && pump.has(setting) ? pump.getDouble(setting) : 30;
                 case "urgentClock":
-                    return pump != null  && pump.has(setting) ? pump.getDouble(setting) : 30;
+                    return pump != null && pump.has(setting) ? pump.getDouble(setting) : 30;
                 case "warnRes":
-                    return pump != null  && pump.has(setting) ? pump.getDouble(setting) : 30;
+                    return pump != null && pump.has(setting) ? pump.getDouble(setting) : 30;
                 case "urgentRes":
-                    return pump != null  && pump.has(setting) ? pump.getDouble(setting) : 30;
+                    return pump != null && pump.has(setting) ? pump.getDouble(setting) : 30;
                 case "warnBattV":
-                    return pump != null  && pump.has(setting) ? pump.getDouble(setting) : 30;
+                    return pump != null && pump.has(setting) ? pump.getDouble(setting) : 30;
                 case "urgentBattV":
-                    return pump != null  && pump.has(setting) ? pump.getDouble(setting) : 30;
-               case "warnBattP":
-                    return pump != null  && pump.has(setting) ? pump.getDouble(setting) : 30;
+                    return pump != null && pump.has(setting) ? pump.getDouble(setting) : 30;
+                case "warnBattP":
+                    return pump != null && pump.has(setting) ? pump.getDouble(setting) : 30;
                 case "urgentBattP":
-                    return pump != null  && pump.has(setting) ? pump.getDouble(setting) : 30;
+                    return pump != null && pump.has(setting) ? pump.getDouble(setting) : 30;
             }
         } catch (JSONException e) {
-            e.printStackTrace();
+            log.error("Unhandled exception", e);
         }
         return 0d;
     }
+
 
     @Nullable
     public JSONObject extentendedPumpSettings() {
         try {
             JSONObject extended = getExtendedSettings();
+            if (extended == null) return null;
             if (extended.has("pump")) {
                 JSONObject pump = extended.getJSONObject("pump");
                 return pump;
             }
         } catch (JSONException e) {
-            e.printStackTrace();
+            log.error("Unhandled exception", e);
         }
         return null;
     }
@@ -330,7 +412,7 @@ public class NSSettingsStatus {
                 return pump.getBoolean("enableAlerts");
             }
         } catch (JSONException e) {
-            e.printStackTrace();
+            log.error("Unhandled exception", e);
         }
         return false;
     }
@@ -342,10 +424,21 @@ public class NSSettingsStatus {
                 return pump.getString("fields");
             }
         } catch (JSONException e) {
-            e.printStackTrace();
+            log.error("Unhandled exception", e);
         }
         return "";
     }
 
+    public boolean openAPSEnabledAlerts() {
+        try {
+            JSONObject pump = extentendedPumpSettings();
+            if (pump != null && pump.has("openaps")) {
+                return pump.getBoolean("enableAlerts");
+            }
+        } catch (JSONException e) {
+            log.error("Unhandled exception", e);
+        }
+        return false;
+    }
 
 }

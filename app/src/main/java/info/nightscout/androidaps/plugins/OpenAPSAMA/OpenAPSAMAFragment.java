@@ -2,14 +2,12 @@ package info.nightscout.androidaps.plugins.OpenAPSAMA;
 
 import android.app.Activity;
 import android.os.Bundle;
-import android.support.v4.app.Fragment;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.TextView;
 
-import com.crashlytics.android.answers.Answers;
 import com.crashlytics.android.answers.CustomEvent;
 import com.squareup.otto.Subscribe;
 
@@ -20,21 +18,16 @@ import org.slf4j.LoggerFactory;
 
 import info.nightscout.androidaps.MainApp;
 import info.nightscout.androidaps.R;
+import info.nightscout.androidaps.logging.L;
+import info.nightscout.androidaps.plugins.Common.SubscriberFragment;
 import info.nightscout.androidaps.plugins.OpenAPSMA.events.EventOpenAPSUpdateGui;
 import info.nightscout.androidaps.plugins.OpenAPSMA.events.EventOpenAPSUpdateResultGui;
+import info.nightscout.utils.DateUtil;
+import info.nightscout.utils.FabricPrivacy;
 import info.nightscout.utils.JSONFormatter;
 
-public class OpenAPSAMAFragment extends Fragment implements View.OnClickListener {
-    private static Logger log = LoggerFactory.getLogger(OpenAPSAMAFragment.class);
-
-    private static OpenAPSAMAPlugin openAPSAMAPlugin;
-
-    public static OpenAPSAMAPlugin getPlugin() {
-        if(openAPSAMAPlugin ==null){
-            openAPSAMAPlugin = new OpenAPSAMAPlugin();
-        }
-        return openAPSAMAPlugin;
-    }
+public class OpenAPSAMAFragment extends SubscriberFragment implements View.OnClickListener {
+    private static Logger log = LoggerFactory.getLogger(L.APS);
 
     Button run;
     TextView lastRunView;
@@ -74,23 +67,11 @@ public class OpenAPSAMAFragment extends Fragment implements View.OnClickListener
     public void onClick(View view) {
         switch (view.getId()) {
             case R.id.openapsma_run:
-                getPlugin().invoke("OpenAPSAMA button");
-                Answers.getInstance().logCustom(new CustomEvent("OpenAPS_AMA_Run"));
+                OpenAPSAMAPlugin.getPlugin().invoke("OpenAPSAMA button", false);
+                FabricPrivacy.getInstance().logCustom(new CustomEvent("OpenAPS_AMA_Run"));
                 break;
         }
 
-    }
-
-    @Override
-    public void onPause() {
-        super.onPause();
-        MainApp.bus().unregister(this);
-    }
-
-    @Override
-    public void onResume() {
-        super.onResume();
-        MainApp.bus().register(this);
     }
 
     @Subscribe
@@ -103,38 +84,36 @@ public class OpenAPSAMAFragment extends Fragment implements View.OnClickListener
         updateResultGUI(ev.text);
     }
 
-    void updateGUI() {
+    @Override
+    protected void updateGUI() {
         Activity activity = getActivity();
         if (activity != null)
-            activity.runOnUiThread(new Runnable() {
-                @Override
-                public void run() {
-                    DetermineBasalResultAMA lastAPSResult = getPlugin().lastAPSResult;
-                    if (lastAPSResult != null) {
-                        resultView.setText(JSONFormatter.format(lastAPSResult.json));
-                        requestView.setText(lastAPSResult.toSpanned());
+            activity.runOnUiThread(() -> {
+                DetermineBasalResultAMA lastAPSResult = OpenAPSAMAPlugin.getPlugin().lastAPSResult;
+                if (lastAPSResult != null) {
+                    resultView.setText(JSONFormatter.format(lastAPSResult.json));
+                    requestView.setText(lastAPSResult.toSpanned());
+                }
+                DetermineBasalAdapterAMAJS determineBasalAdapterAMAJS = OpenAPSAMAPlugin.getPlugin().lastDetermineBasalAdapterAMAJS;
+                if (determineBasalAdapterAMAJS != null) {
+                    glucoseStatusView.setText(JSONFormatter.format(determineBasalAdapterAMAJS.getGlucoseStatusParam()));
+                    currentTempView.setText(JSONFormatter.format(determineBasalAdapterAMAJS.getCurrentTempParam()));
+                    try {
+                        JSONArray iobArray = new JSONArray(determineBasalAdapterAMAJS.getIobDataParam());
+                        iobDataView.setText(String.format(MainApp.gs(R.string.array_of_elements), iobArray.length()) + "\n" + JSONFormatter.format(iobArray.getString(0)));
+                    } catch (JSONException e) {
+                        log.error("Unhandled exception", e);
+                        iobDataView.setText("JSONException");
                     }
-                    DetermineBasalAdapterAMAJS determineBasalAdapterAMAJS = getPlugin().lastDetermineBasalAdapterAMAJS;
-                    if (determineBasalAdapterAMAJS != null) {
-                        glucoseStatusView.setText(JSONFormatter.format(determineBasalAdapterAMAJS.getGlucoseStatusParam()));
-                        currentTempView.setText(JSONFormatter.format(determineBasalAdapterAMAJS.getCurrentTempParam()));
-                        try {
-                            JSONArray iobArray = new JSONArray(determineBasalAdapterAMAJS.getIobDataParam());
-                            iobDataView.setText(String.format(MainApp.sResources.getString(R.string.array_of_elements), iobArray.length()) + "\n" + JSONFormatter.format(iobArray.getString(0)));
-                        } catch (JSONException e) {
-                            e.printStackTrace();
-                            iobDataView.setText("JSONException");
-                        }
-                        profileView.setText(JSONFormatter.format(determineBasalAdapterAMAJS.getProfileParam()));
-                        mealDataView.setText(JSONFormatter.format(determineBasalAdapterAMAJS.getMealDataParam()));
-                        scriptdebugView.setText(determineBasalAdapterAMAJS.getScriptDebug());
-                    }
-                    if (getPlugin().lastAPSRun != null) {
-                        lastRunView.setText(getPlugin().lastAPSRun.toLocaleString());
-                    }
-                    if (getPlugin().lastAutosensResult != null) {
-                        autosensDataView.setText(JSONFormatter.format(getPlugin().lastAutosensResult.json()));
-                    }
+                    profileView.setText(JSONFormatter.format(determineBasalAdapterAMAJS.getProfileParam()));
+                    mealDataView.setText(JSONFormatter.format(determineBasalAdapterAMAJS.getMealDataParam()));
+                    scriptdebugView.setText(determineBasalAdapterAMAJS.getScriptDebug());
+                }
+                if (OpenAPSAMAPlugin.getPlugin().lastAPSRun != 0) {
+                    lastRunView.setText(DateUtil.dateAndTimeFullString(OpenAPSAMAPlugin.getPlugin().lastAPSRun));
+                }
+                if (OpenAPSAMAPlugin.getPlugin().lastAutosensResult != null) {
+                    autosensDataView.setText(JSONFormatter.format(OpenAPSAMAPlugin.getPlugin().lastAutosensResult.json()));
                 }
             });
     }
@@ -142,20 +121,17 @@ public class OpenAPSAMAFragment extends Fragment implements View.OnClickListener
     void updateResultGUI(final String text) {
         Activity activity = getActivity();
         if (activity != null)
-            activity.runOnUiThread(new Runnable() {
-                @Override
-                public void run() {
-                    resultView.setText(text);
-                    glucoseStatusView.setText("");
-                    currentTempView.setText("");
-                    iobDataView.setText("");
-                    profileView.setText("");
-                    mealDataView.setText("");
-                    autosensDataView.setText("");
-                    scriptdebugView.setText("");
-                    requestView.setText("");
-                    lastRunView.setText("");
-                }
+            activity.runOnUiThread(() -> {
+                resultView.setText(text);
+                glucoseStatusView.setText("");
+                currentTempView.setText("");
+                iobDataView.setText("");
+                profileView.setText("");
+                mealDataView.setText("");
+                autosensDataView.setText("");
+                scriptdebugView.setText("");
+                requestView.setText("");
+                lastRunView.setText("");
             });
     }
 }

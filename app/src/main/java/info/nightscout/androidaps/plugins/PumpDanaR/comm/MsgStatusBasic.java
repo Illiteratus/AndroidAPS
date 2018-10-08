@@ -3,15 +3,17 @@ package info.nightscout.androidaps.plugins.PumpDanaR.comm;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import info.nightscout.androidaps.Config;
+import info.nightscout.androidaps.logging.L;
 import info.nightscout.androidaps.plugins.PumpDanaR.DanaRPump;
 
 
 public class MsgStatusBasic extends MessageBase {
-    private static Logger log = LoggerFactory.getLogger(MsgStatusBasic.class);
+    private static Logger log = LoggerFactory.getLogger(L.PUMPCOMM);
 
     public MsgStatusBasic() {
         SetCommand(0x020A);
+        if (L.isEnabled(L.PUMPCOMM))
+            log.debug("New message");
     }
 
     public void handleMessage(byte[] bytes) {
@@ -24,12 +26,13 @@ public class MsgStatusBasic extends MessageBase {
         pump.reservoirRemainingUnits = intFromBuff(bytes, 7, 3) / 750d;
         pump.bolusBlocked = intFromBuff(bytes, 10, 1) == 1;
         pump.currentBasal = intFromBuff(bytes, 11, 2) / 100d;
-        pump.tempBasalPercent = intFromBuff(bytes, 13, 1);
-        pump.isExtendedInProgress = intFromBuff(bytes, 14, 1) == 1;
-        pump.isTempBasalInProgress = intFromBuff(bytes, 15, 1) == 1;
+        // removed. info taken from tempstatus message
+        //pump.tempBasalPercent = intFromBuff(bytes, 13, 1);
+        //pump.isExtendedInProgress = intFromBuff(bytes, 14, 1) == 1;
+        //pump.isTempBasalInProgress = intFromBuff(bytes, 15, 1) == 1;
         pump.batteryRemaining = intFromBuff(bytes, 20, 1);
 
-        if (Config.logDanaMessageDetail) {
+        if (L.isEnabled(L.PUMPCOMM)) {
             log.debug("Pump suspended: " + pump.pumpSuspended);
             log.debug("Calculator enabled: " + pump.calculatorEnabled);
             log.debug("Daily total units: " + pump.dailyTotalUnits);
@@ -37,9 +40,9 @@ public class MsgStatusBasic extends MessageBase {
             log.debug("Reservoir remaining units: " + pump.reservoirRemainingUnits);
             log.debug("Bolus blocked: " + pump.bolusBlocked);
             log.debug("Current basal: " + pump.currentBasal);
-            log.debug("Current temp basal percent: " + pump.tempBasalPercent);
-            log.debug("Is extended bolus running: " + pump.isExtendedInProgress);
-            log.debug("Is temp basal running: " + pump.isTempBasalInProgress);
+            //log.debug("Current temp basal percent: " + pump.tempBasalPercent);
+            //log.debug("Is extended bolus running: " + pump.isExtendedInProgress);
+            //log.debug("Is temp basal running: " + pump.isTempBasalInProgress);
         }
     }
 }

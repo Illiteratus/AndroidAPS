@@ -1,80 +1,65 @@
 package info.nightscout.androidaps.plugins.OpenAPSMA;
 
-import android.os.Parcel;
-import android.os.Parcelable;
-
-import com.eclipsesource.v8.V8Object;
-
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.mozilla.javascript.NativeObject;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import info.nightscout.androidaps.data.IobTotal;
+import info.nightscout.androidaps.logging.L;
 import info.nightscout.androidaps.plugins.Loop.APSResult;
 
 public class DetermineBasalResultMA extends APSResult {
+    private static Logger log = LoggerFactory.getLogger(L.APS);
 
-    public JSONObject json = new JSONObject();
-    public double eventualBG;
-    public double snoozeBG;
-    public String mealAssist;
-    public IobTotal iob;
+    private double eventualBG;
+    private double snoozeBG;
+    private String mealAssist;
 
-    public DetermineBasalResultMA(V8Object result, JSONObject j) {
+    DetermineBasalResultMA(NativeObject result, JSONObject j) {
         json = j;
-        if (result.contains("error")) {
-            reason = result.getString("error");
-            changeRequested = false;
+        if (result.containsKey("error")) {
+            reason = (String) result.get("error");
+            tempBasalRequested = false;
             rate = -1;
             duration = -1;
             mealAssist = "";
         } else {
-            reason = result.getString("reason");
-            eventualBG = result.getDouble("eventualBG");
-            snoozeBG = result.getDouble("snoozeBG");
-            if (result.contains("rate")) {
-                rate = result.getDouble("rate");
+            reason = result.get("reason").toString();
+            eventualBG = (Double) result.get("eventualBG");
+            snoozeBG = (Double) result.get("snoozeBG");
+            if (result.containsKey("rate")) {
+                rate = (Double) result.get("rate");
                 if (rate < 0d) rate = 0d;
-                changeRequested = true;
+                tempBasalRequested = true;
             } else {
                 rate = -1;
-                changeRequested = false;
+                tempBasalRequested = false;
             }
-            if (result.contains("duration")) {
-                duration = result.getInteger("duration");
-                changeRequested = changeRequested;
+            if (result.containsKey("duration")) {
+                duration = ((Double) result.get("duration")).intValue();
+                //changeRequested as above
             } else {
                 duration = -1;
-                changeRequested = false;
+                tempBasalRequested = false;
             }
-            if (result.contains("mealAssist")) {
-                mealAssist = result.getString("mealAssist");
+            if (result.containsKey("mealAssist")) {
+                mealAssist = result.get("mealAssist").toString();
             } else mealAssist = "";
         }
-        result.release();
     }
 
-    public DetermineBasalResultMA() {
+    private DetermineBasalResultMA() {
     }
 
     @Override
     public DetermineBasalResultMA clone() {
         DetermineBasalResultMA newResult = new DetermineBasalResultMA();
-        newResult.reason = new String(reason);
-        newResult.rate = rate;
-        newResult.duration = duration;
-        newResult.changeRequested = changeRequested;
-        newResult.rate = rate;
-        newResult.duration = duration;
-        newResult.changeRequested = changeRequested;
+        doClone(newResult);
 
-        try {
-            newResult.json = new JSONObject(json.toString());
-        } catch (JSONException e) {
-            e.printStackTrace();
-        }
         newResult.eventualBG = eventualBG;
         newResult.snoozeBG = snoozeBG;
-        newResult.mealAssist = new String(mealAssist);
+        newResult.mealAssist = mealAssist;
         return newResult;
     }
 
@@ -84,7 +69,7 @@ public class DetermineBasalResultMA extends APSResult {
             JSONObject ret = new JSONObject(this.json.toString());
             return ret;
         } catch (JSONException e) {
-            e.printStackTrace();
+            log.error("Unhandled exception", e);
         }
         return null;
     }

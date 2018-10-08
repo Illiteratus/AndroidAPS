@@ -1,10 +1,14 @@
 package info.nightscout.androidaps.data;
 
+import android.app.Notification;
+import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.os.AsyncTask;
 import android.os.Bundle;
+import android.os.SystemClock;
 import android.preference.PreferenceManager;
 import android.support.v4.content.LocalBroadcastManager;
 import android.support.v4.app.NotificationCompat;
@@ -26,6 +30,9 @@ import java.util.concurrent.TimeUnit;
 
 import info.nightscout.androidaps.interaction.AAPSPreferences;
 import info.nightscout.androidaps.R;
+import info.nightscout.androidaps.interaction.actions.AcceptActivity;
+import info.nightscout.androidaps.interaction.actions.CPPActivity;
+import info.nightscout.androidaps.interaction.utils.SafeParse;
 
 /**
  * Created by emmablack on 12/26/14.
@@ -40,17 +47,22 @@ public class ListenerService extends WearableListenerService implements GoogleAp
 
     private static final String OPEN_SETTINGS = "/openwearsettings";
     private static final String NEW_STATUS_PATH = "/sendstatustowear";
+    private static final String NEW_PREFERENCES_PATH = "/sendpreferencestowear";
     public static final String BASAL_DATA_PATH = "/nightscout_watch_basal";
     public static final String BOLUS_PROGRESS_PATH = "/nightscout_watch_bolusprogress";
     public static final String ACTION_CONFIRMATION_REQUEST_PATH = "/nightscout_watch_actionconfirmationrequest";
+    public static final String NEW_CHANGECONFIRMATIONREQUEST_PATH = "/nightscout_watch_changeconfirmationrequest";
+    public static final String ACTION_CANCELNOTIFICATION_REQUEST_PATH = "/nightscout_watch_cancelnotificationrequest";
 
 
     public static final int BOLUS_PROGRESS_NOTIF_ID = 001;
     public static final int CONFIRM_NOTIF_ID = 002;
+    public static final int CHANGE_NOTIF_ID = 556677;
 
     private static final String ACTION_RESEND = "com.dexdrip.stephenblack.nightwatch.RESEND_DATA";
     private static final String ACTION_CANCELBOLUS = "com.dexdrip.stephenblack.nightwatch.CANCELBOLUS";
     private static final String ACTION_CONFIRMATION = "com.dexdrip.stephenblack.nightwatch.CONFIRMACTION";
+    private static final String ACTION_CONFIRMCHANGE = "com.dexdrip.stephenblack.nightwatch.CONFIRMCHANGE";
     private static final String ACTION_INITIATE_ACTION = "com.dexdrip.stephenblack.nightwatch.INITIATE_ACTION";
 
 
@@ -217,6 +229,17 @@ public class ListenerService extends WearableListenerService implements GoogleAp
             String actionstring = intent.getStringExtra("actionstring");
             sendConfirmActionstring(actionstring);
 
+        } else if(intent != null && ACTION_CONFIRMCHANGE.equals(intent.getAction())){
+            googleApiConnect();
+
+            //dismiss notification
+            NotificationManagerCompat notificationManager =
+                    NotificationManagerCompat.from(ListenerService.this);
+            notificationManager.cancel(CHANGE_NOTIF_ID);
+
+            String actionstring = intent.getStringExtra("actionstring");
+            sendConfirmActionstring(actionstring);
+
          } else if(intent != null && ACTION_INITIATE_ACTION.equals(intent.getAction())){
             googleApiConnect();
 
@@ -252,8 +275,22 @@ public class ListenerService extends WearableListenerService implements GoogleAp
                     String title = DataMapItem.fromDataItem(event.getDataItem()).getDataMap().getString("title");
                     String message = DataMapItem.fromDataItem(event.getDataItem()).getDataMap().getString("message");
                     String actionstring = DataMapItem.fromDataItem(event.getDataItem()).getDataMap().getString("actionstring");
-                    showConfirmationDialog(title, message, actionstring);
-                }else if (path.equals(NEW_STATUS_PATH)) {
+
+                    if("opencpp".equals(title) && actionstring.startsWith("opencpp")){
+                        String[] act = actionstring.split("\\s+");
+                        Intent intent = new Intent(this, CPPActivity.class);
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        //TODO adrian: parse actionstring and add parameters
+                        Bundle params = new Bundle();
+                        params.putInt("percentage", SafeParse.stringToInt(act[1]));
+                        params.putInt("timeshift", SafeParse.stringToInt(act[2]));
+                        intent.putExtras(params);
+                        startActivity(intent);
+                    } else {
+                        showConfirmationDialog(title, message, actionstring);
+                    }
+
+                } else if (path.equals(NEW_STATUS_PATH)) {
                     dataMap = DataMapItem.fromDataItem(event.getDataItem()).getDataMap();
                     Intent messageIntent = new Intent();
                     messageIntent.setAction(Intent.ACTION_SEND);
@@ -265,6 +302,23 @@ public class ListenerService extends WearableListenerService implements GoogleAp
                     messageIntent.setAction(Intent.ACTION_SEND);
                     messageIntent.putExtra("basals", dataMap.toBundle());
                     LocalBroadcastManager.getInstance(this).sendBroadcast(messageIntent);
+                } else if (path.equals(NEW_PREFERENCES_PATH)){
+                    dataMap = DataMapItem.fromDataItem(event.getDataItem()).getDataMap();
+                    if(dataMap.containsKey("wearcontrol")) {
+                        boolean wearcontrol = dataMap.getBoolean("wearcontrol", false);
+                        SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(this);
+                        SharedPreferences.Editor editor = sharedPreferences.edit();
+                        editor.putBoolean("wearcontrol", wearcontrol);
+                        editor.commit();
+                    }
+                } else if (path.equals(NEW_CHANGECONFIRMATIONREQUEST_PATH)) {
+                    String title = DataMapItem.fromDataItem(event.getDataItem()).getDataMap().getString("title");
+                    String message = DataMapItem.fromDataItem(event.getDataItem()).getDataMap().getString("message");
+                    String actionstring = DataMapItem.fromDataItem(event.getDataItem()).getDataMap().getString("actionstring");
+                    notifyChangeRequest(title, message, actionstring);
+                } else if (path.equals(ACTION_CANCELNOTIFICATION_REQUEST_PATH)) {
+                    String actionstring = DataMapItem.fromDataItem(event.getDataItem()).getDataMap().getString("actionstring");
+                    cancelNotificationRequest(actionstring);
                 } else {
                     dataMap = DataMapItem.fromDataItem(event.getDataItem()).getDataMap();
                     Intent messageIntent = new Intent();
@@ -274,6 +328,41 @@ public class ListenerService extends WearableListenerService implements GoogleAp
                 }
             }
         }
+    }
+
+    private void notifyChangeRequest(String title, String message, String actionstring) {
+
+        Notification.Builder builder =
+                new Notification.Builder(this); //,"AndroidAPS-Openloop");
+        builder.setSmallIcon(R.drawable.notif_icon)
+                .setContentTitle(title)
+                .setContentText(message)
+                .setPriority(Notification.PRIORITY_HIGH);
+
+        // Creates an explicit intent for an Activity in your app
+        Intent intent = new Intent(this, AcceptActivity.class);
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        Bundle params = new Bundle();
+        params.putString("title", title);
+        params.putString("message", message);
+        params.putString("actionstring", actionstring);
+        intent.putExtras(params);
+
+        PendingIntent resultPendingIntent =
+                PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT);
+        builder.setContentIntent(resultPendingIntent);
+        builder.setVibrate(new long[]{1000, 1000, 1000, 1000, 1000});
+
+        NotificationManager mNotificationManager =
+                (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+        // mId allows you to update the notification later on.
+        mNotificationManager.notify(CHANGE_NOTIF_ID, builder.build());
+    }
+
+    private void cancelNotificationRequest(String actionstring) {
+        NotificationManager mNotificationManager =
+                (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+        mNotificationManager.cancel(CHANGE_NOTIF_ID);
     }
 
     private void showBolusProgress(int progresspercent, String progresstatus) {
@@ -317,45 +406,14 @@ public class ListenerService extends WearableListenerService implements GoogleAp
 
     private void showConfirmationDialog(String title, String message, String actionstring) {
 
-        if(confirmThread != null){
-            confirmThread.invalidate();
-        }
-
-        Intent actionIntent = new Intent(this, ListenerService.class);
-        actionIntent.setAction(ACTION_CONFIRMATION);
-        actionIntent.putExtra("actionstring", actionstring);
-        PendingIntent actionPendingIntent = PendingIntent.getService(this, 0, actionIntent, PendingIntent.FLAG_CANCEL_CURRENT | PendingIntent.FLAG_UPDATE_CURRENT);;
-
-        long[] vibratePattern = new long[]{0, 100, 50, 100, 50};
-
-        NotificationCompat.Builder notificationBuilder =
-                new NotificationCompat.Builder(this)
-                        .setSmallIcon(R.drawable.ic_icon)
-                        .setContentTitle(title)
-                        .setContentText(message)
-                        .setContentIntent(actionPendingIntent)
-                        .setPriority(NotificationCompat.PRIORITY_MAX)
-                        .setVibrate(vibratePattern)
-                        .setStyle(new NotificationCompat.BigTextStyle().bigText(message))
-                        .extend(new NotificationCompat.WearableExtender())
-                        .addAction(R.drawable.ic_confirm, title, actionPendingIntent);
-
-        NotificationManagerCompat notificationManager =
-                NotificationManagerCompat.from(this);
-
-        notificationManager.notify(CONFIRM_NOTIF_ID, notificationBuilder.build());
-
-        // keep the confirmation dialog open for one minute.
-        scheduleDismissConfirm(60);
-
-    }
-
-    private void scheduleDismissConfirm(final int seconds) {
-        if(confirmThread != null){
-            confirmThread.invalidate();
-        }
-        confirmThread = new DismissThread(CONFIRM_NOTIF_ID, seconds);
-        confirmThread.start();
+        Intent intent = new Intent(this, AcceptActivity.class);
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        Bundle params = new Bundle();
+        params.putString("title", title);
+        params.putString("message", message);
+        params.putString("actionstring", actionstring);
+        intent.putExtras(params);
+        startActivity(intent);
     }
 
     private void scheduleDismissBolusprogress(final int seconds) {
@@ -384,11 +442,7 @@ public class ListenerService extends WearableListenerService implements GoogleAp
 
         @Override
         public void run() {
-            try {
-                Thread.sleep(seconds * 1000);
-            } catch (InterruptedException e) {
-                //e.printStackTrace();
-            }
+            SystemClock.sleep(seconds * 1000);
             synchronized (this) {
                 if(valid) {
                     NotificationManagerCompat notificationManager =
@@ -409,6 +463,18 @@ public class ListenerService extends WearableListenerService implements GoogleAp
         Intent intent = new Intent(context, ListenerService.class);
         intent.putExtra("actionstring", actionstring);
         intent.setAction(ACTION_INITIATE_ACTION);
+        context.startService(intent);
+    }
+
+    public static void confirmAction(Context context, String actionstring) {
+        Intent intent = new Intent(context, ListenerService.class);
+        intent.putExtra("actionstring", actionstring);
+
+        if (actionstring.equals("changeRequest")) {
+            intent.setAction(ACTION_CONFIRMCHANGE);
+        } else {
+            intent.setAction(ACTION_CONFIRMATION);
+        }
         context.startService(intent);
     }
 

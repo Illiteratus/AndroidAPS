@@ -2,12 +2,18 @@ package info.nightscout.androidaps.plugins.NSClientInternal.data;
 
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import info.nightscout.androidaps.logging.L;
 
 /**
  * Created by mike on 11.06.2017.
  */
 
 public class NSAlarm {
+    private static Logger log = LoggerFactory.getLogger(L.NSCLIENT);
+
     JSONObject data;
 
     public NSAlarm(JSONObject data) {
@@ -20,7 +26,7 @@ public class NSAlarm {
             try {
                 retval = data.getInt("level");
             } catch (JSONException e) {
-                e.printStackTrace();
+                log.error("Unhandled exception", e);
             }
         }
          return retval;
@@ -32,7 +38,7 @@ public class NSAlarm {
             try {
                 retval = data.getString("group");
             } catch (JSONException e) {
-                e.printStackTrace();
+                log.error("Unhandled exception", e);
             }
         }
          return retval;
@@ -44,7 +50,7 @@ public class NSAlarm {
             try {
                 retval = data.getString("title");
             } catch (JSONException e) {
-                e.printStackTrace();
+                log.error("Unhandled exception", e);
             }
         }
          return retval;
@@ -56,7 +62,7 @@ public class NSAlarm {
             try {
                 retval = data.getString("message");
             } catch (JSONException e) {
-                e.printStackTrace();
+                log.error("Unhandled exception", e);
             }
         }
          return retval;

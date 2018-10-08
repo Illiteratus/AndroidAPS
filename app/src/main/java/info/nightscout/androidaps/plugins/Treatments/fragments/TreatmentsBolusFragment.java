@@ -6,7 +6,7 @@ import android.content.DialogInterface;
 import android.content.Intent;
 import android.graphics.Paint;
 import android.os.Bundle;
-import android.support.v4.app.Fragment;
+import android.support.v4.app.FragmentManager;
 import android.support.v4.content.ContextCompat;
 import android.support.v7.app.AlertDialog;
 import android.support.v7.widget.CardView;
@@ -18,40 +18,43 @@ import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.TextView;
 
-import com.crashlytics.android.answers.Answers;
 import com.crashlytics.android.answers.CustomEvent;
 import com.squareup.otto.Subscribe;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.json.JSONObject;
 
-import java.util.Date;
 import java.util.List;
 
 import info.nightscout.androidaps.MainApp;
 import info.nightscout.androidaps.R;
-import info.nightscout.androidaps.Services.Intents;
 import info.nightscout.androidaps.data.Iob;
+import info.nightscout.androidaps.data.Profile;
 import info.nightscout.androidaps.db.Source;
-import info.nightscout.androidaps.db.Treatment;
 import info.nightscout.androidaps.events.EventNewBG;
 import info.nightscout.androidaps.events.EventTreatmentChange;
-import info.nightscout.androidaps.data.Profile;
+import info.nightscout.androidaps.plugins.Common.SubscriberFragment;
+import info.nightscout.androidaps.plugins.ConfigBuilder.ProfileFunctions;
+import info.nightscout.androidaps.plugins.NSClientInternal.NSUpload;
+import info.nightscout.androidaps.plugins.NSClientInternal.UploadQueue;
+import info.nightscout.androidaps.plugins.Treatments.Treatment;
 import info.nightscout.androidaps.plugins.Treatments.TreatmentsPlugin;
+import info.nightscout.androidaps.plugins.Treatments.dialogs.WizardInfoDialog;
+import info.nightscout.androidaps.services.Intents;
 import info.nightscout.utils.DateUtil;
 import info.nightscout.utils.DecimalFormatter;
-import info.nightscout.utils.NSUpload;
+import info.nightscout.utils.FabricPrivacy;
 import info.nightscout.utils.SP;
 
-public class TreatmentsBolusFragment extends Fragment implements View.OnClickListener {
-    private static Logger log = LoggerFactory.getLogger(TreatmentsBolusFragment.class);
+import static info.nightscout.utils.DateUtil.now;
 
+public class TreatmentsBolusFragment extends SubscriberFragment implements View.OnClickListener {
     RecyclerView recyclerView;
     LinearLayoutManager llm;
 
     TextView iobTotal;
     TextView activityTotal;
     Button refreshFromNS;
+    Button deleteFutureTreatments;
 
     Context context;
 
@@ -71,24 +74,30 @@ public class TreatmentsBolusFragment extends Fragment implements View.OnClickLis
 
         @Override
         public void onBindViewHolder(TreatmentsViewHolder holder, int position) {
-            Profile profile = MainApp.getConfigBuilder().getProfile();
+            Profile profile = ProfileFunctions.getInstance().getProfile();
             if (profile == null)
                 return;
             Treatment t = treatments.get(position);
             holder.date.setText(DateUtil.dateAndTimeString(t.date));
-            holder.insulin.setText(DecimalFormatter.to2Decimal(t.insulin) + " U");
+            holder.insulin.setText(DecimalFormatter.toPumpSupportedBolus(t.insulin) + " U");
             holder.carbs.setText(DecimalFormatter.to0Decimal(t.carbs) + " g");
             Iob iob = t.iobCalc(System.currentTimeMillis(), profile.getDia());
             holder.iob.setText(DecimalFormatter.to2Decimal(iob.iobContrib) + " U");
-            holder.activity.setText(DecimalFormatter.to3Decimal(iob.activityContrib) + " U");
-            holder.mealOrCorrection.setText(t.mealBolus ? MainApp.sResources.getString(R.string.mealbolus) : MainApp.sResources.getString(R.string.correctionbous));
+            holder.mealOrCorrection.setText(t.isSMB ? "SMB" : t.mealBolus ? MainApp.gs(R.string.mealbolus) : MainApp.gs(R.string.correctionbous));
             holder.ph.setVisibility(t.source == Source.PUMP ? View.VISIBLE : View.GONE);
-            holder.ns.setVisibility(t._id != null ? View.VISIBLE : View.GONE);
+            holder.ns.setVisibility(NSUpload.isIdValid(t._id) ? View.VISIBLE : View.GONE);
+            holder.invalid.setVisibility(t.isValid ? View.GONE : View.VISIBLE);
             if (iob.iobContrib != 0)
                 holder.iob.setTextColor(ContextCompat.getColor(MainApp.instance(), R.color.colorActive));
             else
                 holder.iob.setTextColor(holder.carbs.getCurrentTextColor());
+            if (t.date > now())
+                holder.date.setTextColor(ContextCompat.getColor(MainApp.instance(), R.color.colorScheduled));
+            else
+                holder.date.setTextColor(holder.carbs.getCurrentTextColor());
             holder.remove.setTag(t);
+            holder.calculation.setTag(t);
+            holder.calculation.setVisibility(t.getBoluscalc() == null ? View.INVISIBLE : View.VISIBLE);
         }
 
         @Override
@@ -107,11 +116,12 @@ public class TreatmentsBolusFragment extends Fragment implements View.OnClickLis
             TextView insulin;
             TextView carbs;
             TextView iob;
-            TextView activity;
             TextView mealOrCorrection;
             TextView remove;
+            TextView calculation;
             TextView ph;
             TextView ns;
+            TextView invalid;
 
             TreatmentsViewHolder(View itemView) {
                 super(itemView);
@@ -120,10 +130,13 @@ public class TreatmentsBolusFragment extends Fragment implements View.OnClickLis
                 insulin = (TextView) itemView.findViewById(R.id.treatments_insulin);
                 carbs = (TextView) itemView.findViewById(R.id.treatments_carbs);
                 iob = (TextView) itemView.findViewById(R.id.treatments_iob);
-                activity = (TextView) itemView.findViewById(R.id.treatments_activity);
                 mealOrCorrection = (TextView) itemView.findViewById(R.id.treatments_mealorcorrection);
                 ph = (TextView) itemView.findViewById(R.id.pump_sign);
                 ns = (TextView) itemView.findViewById(R.id.ns_sign);
+                invalid = (TextView) itemView.findViewById(R.id.invalid_sign);
+                calculation = (TextView) itemView.findViewById(R.id.treatments_calculation);
+                calculation.setOnClickListener(this);
+                calculation.setPaintFlags(calculation.getPaintFlags() | Paint.UNDERLINE_TEXT_FLAG);
                 remove = (TextView) itemView.findViewById(R.id.treatments_remove);
                 remove.setOnClickListener(this);
                 remove.setPaintFlags(remove.getPaintFlags() | Paint.UNDERLINE_TEXT_FLAG);
@@ -132,24 +145,45 @@ public class TreatmentsBolusFragment extends Fragment implements View.OnClickLis
             @Override
             public void onClick(View v) {
                 final Treatment treatment = (Treatment) v.getTag();
+                if (treatment == null)
+                    return;
                 switch (v.getId()) {
                     case R.id.treatments_remove:
                         AlertDialog.Builder builder = new AlertDialog.Builder(context);
-                        builder.setTitle(MainApp.sResources.getString(R.string.confirmation));
-                        builder.setMessage(MainApp.sResources.getString(R.string.removerecord) + "\n" + DateUtil.dateAndTimeString(treatment.date));
-                        builder.setPositiveButton(MainApp.sResources.getString(R.string.ok), new DialogInterface.OnClickListener() {
+                        builder.setTitle(MainApp.gs(R.string.confirmation));
+                        builder.setMessage(MainApp.gs(R.string.removerecord) + "\n" + DateUtil.dateAndTimeString(treatment.date));
+                        builder.setPositiveButton(MainApp.gs(R.string.ok), new DialogInterface.OnClickListener() {
                             public void onClick(DialogInterface dialog, int id) {
                                 final String _id = treatment._id;
-                                if (_id != null && !_id.equals("")) {
-                                    NSUpload.removeCareportalEntryFromNS(_id);
+                                if (treatment.source == Source.PUMP) {
+                                    treatment.isValid = false;
+                                    TreatmentsPlugin.getPlugin().getService().update(treatment);
+                                } else {
+                                    if (NSUpload.isIdValid(_id)) {
+                                        NSUpload.removeCareportalEntryFromNS(_id);
+                                    } else {
+                                        UploadQueue.removeID("dbAdd", _id);
+                                    }
+                                    TreatmentsPlugin.getPlugin().getService().delete(treatment);
                                 }
-                                MainApp.getDbHelper().delete(treatment);
                                 updateGUI();
-                                Answers.getInstance().logCustom(new CustomEvent("RemoveTreatment"));
+                                FabricPrivacy.getInstance().logCustom(new CustomEvent("RemoveTreatment"));
                             }
                         });
-                        builder.setNegativeButton(MainApp.sResources.getString(R.string.cancel), null);
+                        builder.setNegativeButton(MainApp.gs(R.string.cancel), null);
                         builder.show();
+                        break;
+                    case R.id.treatments_calculation:
+                        FragmentManager manager = getFragmentManager();
+                        // try to fix  https://fabric.io/nightscout3/android/apps/info.nightscout.androidaps/issues/5aca7a1536c7b23527eb4be7?time=last-seven-days
+                        // https://stackoverflow.com/questions/14860239/checking-if-state-is-saved-before-committing-a-fragmenttransaction
+                        if (manager.isStateSaved())
+                            return;
+                        if (treatment.getBoluscalc() != null) {
+                            WizardInfoDialog wizardDialog = new WizardInfoDialog();
+                            wizardDialog.setData(treatment.getBoluscalc());
+                            wizardDialog.show(manager, "WizardInfoDialog");
+                        }
                         break;
                 }
             }
@@ -166,7 +200,7 @@ public class TreatmentsBolusFragment extends Fragment implements View.OnClickLis
         llm = new LinearLayoutManager(view.getContext());
         recyclerView.setLayoutManager(llm);
 
-        RecyclerViewAdapter adapter = new RecyclerViewAdapter(TreatmentsPlugin.treatments);
+        RecyclerViewAdapter adapter = new RecyclerViewAdapter(TreatmentsPlugin.getPlugin().getTreatmentsFromHistory());
         recyclerView.setAdapter(adapter);
 
         iobTotal = (TextView) view.findViewById(R.id.treatments_iobtotal);
@@ -174,6 +208,9 @@ public class TreatmentsBolusFragment extends Fragment implements View.OnClickLis
 
         refreshFromNS = (Button) view.findViewById(R.id.treatments_reshreshfromnightscout);
         refreshFromNS.setOnClickListener(this);
+
+        deleteFutureTreatments = (Button) view.findViewById(R.id.treatments_delete_future_treatments);
+        deleteFutureTreatments.setOnClickListener(this);
 
         boolean nsUploadOnly = SP.getBoolean(R.string.key_ns_upload_only, false);
         if (nsUploadOnly)
@@ -187,35 +224,42 @@ public class TreatmentsBolusFragment extends Fragment implements View.OnClickLis
 
     @Override
     public void onClick(View view) {
+        AlertDialog.Builder builder;
         switch (view.getId()) {
             case R.id.treatments_reshreshfromnightscout:
-                AlertDialog.Builder builder = new AlertDialog.Builder(this.getContext());
-                builder.setTitle(this.getContext().getString(R.string.confirmation));
-                builder.setMessage(this.getContext().getString(R.string.refresheventsfromnightscout) + "?");
-                builder.setPositiveButton(this.getContext().getString(R.string.ok), new DialogInterface.OnClickListener() {
-                    public void onClick(DialogInterface dialog, int id) {
-                        MainApp.getDbHelper().resetTreatments();
-                        Intent restartNSClient = new Intent(Intents.ACTION_RESTART);
-                        MainApp.instance().getApplicationContext().sendBroadcast(restartNSClient);
-                    }
+                builder = new AlertDialog.Builder(this.getContext());
+                builder.setTitle(MainApp.gs(R.string.confirmation));
+                builder.setMessage(MainApp.gs(R.string.refresheventsfromnightscout) + "?");
+                builder.setPositiveButton(MainApp.gs(R.string.ok), (dialog, id) -> {
+                    TreatmentsPlugin.getPlugin().getService().resetTreatments();
+                    Intent restartNSClient = new Intent(Intents.ACTION_RESTART);
+                    MainApp.instance().getApplicationContext().sendBroadcast(restartNSClient);
                 });
-                builder.setNegativeButton(this.getContext().getString(R.string.cancel), null);
+                builder.setNegativeButton(MainApp.gs(R.string.cancel), null);
+                builder.show();
+                break;
+            case R.id.treatments_delete_future_treatments:
+                builder = new AlertDialog.Builder(this.getContext());
+                builder.setTitle(MainApp.gs(R.string.confirmation));
+                builder.setMessage(MainApp.gs(R.string.deletefuturetreatments) + "?");
+                builder.setPositiveButton(MainApp.gs(R.string.ok), (dialog, id) -> {
+                    final List<Treatment> futureTreatments = TreatmentsPlugin.getPlugin().getService()
+                            .getTreatmentDataFromTime(now() + 1000, true);
+                    for (Treatment treatment : futureTreatments) {
+                        final String _id = treatment._id;
+                        if (NSUpload.isIdValid(_id)) {
+                            NSUpload.removeCareportalEntryFromNS(_id);
+                        } else {
+                            UploadQueue.removeID("dbAdd", _id);
+                        }
+                        TreatmentsPlugin.getPlugin().getService().delete(treatment);
+                    }
+                    updateGUI();
+                });
+                builder.setNegativeButton(MainApp.gs(R.string.cancel), null);
                 builder.show();
                 break;
         }
-    }
-
-    @Override
-    public void onPause() {
-        super.onPause();
-        MainApp.bus().unregister(this);
-    }
-
-    @Override
-    public void onResume() {
-        super.onResume();
-        MainApp.bus().register(this);
-        updateGUI();
     }
 
     @Subscribe
@@ -228,17 +272,20 @@ public class TreatmentsBolusFragment extends Fragment implements View.OnClickLis
         updateGUI();
     }
 
-    public void updateGUI() {
+    @Override
+    protected void updateGUI() {
         Activity activity = getActivity();
         if (activity != null)
-            activity.runOnUiThread(new Runnable() {
-                @Override
-                public void run() {
-                    recyclerView.swapAdapter(new RecyclerViewAdapter(TreatmentsPlugin.treatments), false);
-                    if (TreatmentsPlugin.lastTreatmentCalculation != null)
-                        iobTotal.setText(DecimalFormatter.to2Decimal(TreatmentsPlugin.lastTreatmentCalculation.iob) + " U");
-                    if (TreatmentsPlugin.lastTreatmentCalculation != null)
-                        activityTotal.setText(DecimalFormatter.to3Decimal(TreatmentsPlugin.lastTreatmentCalculation.activity) + " U");
+            activity.runOnUiThread(() -> {
+                recyclerView.swapAdapter(new RecyclerViewAdapter(TreatmentsPlugin.getPlugin().getTreatmentsFromHistory()), false);
+                if (TreatmentsPlugin.getPlugin().getLastCalculationTreatments() != null) {
+                    iobTotal.setText(DecimalFormatter.to2Decimal(TreatmentsPlugin.getPlugin().getLastCalculationTreatments().iob) + " " + MainApp.gs(R.string.insulin_unit_shortname));
+                    activityTotal.setText(DecimalFormatter.to3Decimal(TreatmentsPlugin.getPlugin().getLastCalculationTreatments().activity) + " " + MainApp.gs(R.string.insulin_unit_shortname));
+                }
+                if (!TreatmentsPlugin.getPlugin().getService().getTreatmentDataFromTime(now() + 1000, true).isEmpty()) {
+                    deleteFutureTreatments.setVisibility(View.VISIBLE);
+                } else {
+                    deleteFutureTreatments.setVisibility(View.GONE);
                 }
             });
     }

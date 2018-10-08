@@ -5,7 +5,6 @@ import android.app.Activity;
 import android.os.Bundle;
 import android.os.Handler;
 import android.support.annotation.Nullable;
-import android.support.v4.app.Fragment;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -16,13 +15,17 @@ import com.squareup.otto.Subscribe;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Date;
-
 import info.nightscout.androidaps.MainApp;
 import info.nightscout.androidaps.R;
+import info.nightscout.androidaps.db.ExtendedBolus;
+import info.nightscout.androidaps.db.TemporaryBasal;
+import info.nightscout.androidaps.plugins.Common.SubscriberFragment;
+import info.nightscout.androidaps.plugins.PumpCommon.defs.PumpType;
 import info.nightscout.androidaps.plugins.PumpVirtual.events.EventVirtualPumpUpdateGui;
+import info.nightscout.androidaps.plugins.Treatments.TreatmentsPlugin;
+import info.nightscout.utils.FabricPrivacy;
 
-public class VirtualPumpFragment extends Fragment {
+public class VirtualPumpFragment extends SubscriberFragment {
     private static Logger log = LoggerFactory.getLogger(VirtualPumpFragment.class);
 
     TextView basaBasalRateView;
@@ -30,6 +33,9 @@ public class VirtualPumpFragment extends Fragment {
     TextView extendedBolusView;
     TextView batteryView;
     TextView reservoirView;
+    TextView pumpTypeView;
+    TextView pumpSettingsView;
+
 
     private static Handler sLoopHandler = new Handler();
     private static Runnable sRefreshLoop = null;
@@ -52,27 +58,22 @@ public class VirtualPumpFragment extends Fragment {
     @Override
     public View onCreateView(LayoutInflater inflater, ViewGroup container,
                              Bundle savedInstanceState) {
-        View view = inflater.inflate(R.layout.vitualpump_fragment, container, false);
-        basaBasalRateView = (TextView) view.findViewById(R.id.virtualpump_basabasalrate);
-        tempBasalView = (TextView) view.findViewById(R.id.virtualpump_tempbasal);
-        extendedBolusView = (TextView) view.findViewById(R.id.virtualpump_extendedbolus);
-        batteryView = (TextView) view.findViewById(R.id.virtualpump_battery);
-        reservoirView = (TextView) view.findViewById(R.id.virtualpump_reservoir);
+        try {
+            View view = inflater.inflate(R.layout.virtualpump_fragment, container, false);
+            basaBasalRateView = (TextView) view.findViewById(R.id.virtualpump_basabasalrate);
+            tempBasalView = (TextView) view.findViewById(R.id.virtualpump_tempbasal);
+            extendedBolusView = (TextView) view.findViewById(R.id.virtualpump_extendedbolus);
+            batteryView = (TextView) view.findViewById(R.id.virtualpump_battery);
+            reservoirView = (TextView) view.findViewById(R.id.virtualpump_reservoir);
+            pumpTypeView = (TextView) view.findViewById(R.id.virtualpump_type);
+            pumpSettingsView = (TextView) view.findViewById(R.id.virtualpump_type_def);
 
-        updateGUI();
-        return view;
-    }
+            return view;
+        } catch (Exception e) {
+            FabricPrivacy.logException(e);
+        }
 
-    @Override
-    public void onPause() {
-        super.onPause();
-        MainApp.bus().unregister(this);
-    }
-
-    @Override
-    public void onResume() {
-        super.onResume();
-        MainApp.bus().register(this);
+        return null;
     }
 
     @Subscribe
@@ -80,26 +81,41 @@ public class VirtualPumpFragment extends Fragment {
         updateGUI();
     }
 
-    public void updateGUI() {
+    @Override
+    protected void updateGUI() {
         Activity activity = getActivity();
         if (activity != null && basaBasalRateView != null)
             activity.runOnUiThread(new Runnable() {
                 @Override
                 public void run() {
-
-                    basaBasalRateView.setText(VirtualPumpPlugin.getInstance().getBaseBasalRate() + "U");
-                    if (MainApp.getConfigBuilder().isTempBasalInProgress()) {
-                        tempBasalView.setText(MainApp.getConfigBuilder().getTempBasalFromHistory(System.currentTimeMillis()).toStringFull());
+                    VirtualPumpPlugin virtualPump = VirtualPumpPlugin.getPlugin();
+                    basaBasalRateView.setText(virtualPump.getBaseBasalRate() + "U");
+                    TemporaryBasal activeTemp = TreatmentsPlugin.getPlugin().getTempBasalFromHistory(System.currentTimeMillis());
+                    if (activeTemp != null) {
+                        tempBasalView.setText(activeTemp.toStringFull());
                     } else {
                         tempBasalView.setText("");
                     }
-                    if (MainApp.getConfigBuilder().isInHistoryExtendedBoluslInProgress()) {
-                        extendedBolusView.setText(MainApp.getConfigBuilder().getExtendedBolusFromHistory(System.currentTimeMillis()).toString());
+                    ExtendedBolus activeExtendedBolus = TreatmentsPlugin.getPlugin().getExtendedBolusFromHistory(System.currentTimeMillis());
+                    if (activeExtendedBolus != null) {
+                        extendedBolusView.setText(activeExtendedBolus.toString());
                     } else {
                         extendedBolusView.setText("");
                     }
-                    batteryView.setText(VirtualPumpPlugin.getInstance().batteryPercent + "%");
-                    reservoirView.setText(VirtualPumpPlugin.getInstance().reservoirInUnits + "U");
+                    batteryView.setText(virtualPump.batteryPercent + "%");
+                    reservoirView.setText(virtualPump.reservoirInUnits + "U");
+
+                    virtualPump.refreshConfiguration();
+
+                    PumpType pumpType = virtualPump.getPumpType();
+
+                    pumpTypeView.setText(pumpType.getDescription());
+
+                    String template = MainApp.gs(R.string.virtualpump_pump_def);
+
+
+                    pumpSettingsView.setText(pumpType.getFullDescription(template, pumpType.hasExtendedBasals()));
+
                 }
             });
     }

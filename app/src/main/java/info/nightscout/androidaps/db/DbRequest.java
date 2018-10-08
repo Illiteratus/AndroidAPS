@@ -10,6 +10,8 @@ import org.json.JSONObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import info.nightscout.androidaps.logging.L;
+
 /**
  * Created by mike on 27.02.2016.
  * <p>
@@ -17,7 +19,7 @@ import org.slf4j.LoggerFactory;
  */
 @DatabaseTable(tableName = DatabaseHelper.DATABASE_DBREQUESTS)
 public class DbRequest {
-    private static Logger log = LoggerFactory.getLogger(DbRequest.class);
+    private static Logger log = LoggerFactory.getLogger(L.DATABASE);
 
     @DatabaseField(id = true)
     public String nsClientID = null;
@@ -77,7 +79,7 @@ public class DbRequest {
             if (_id != null) object.put("_id", _id);
             if (nsClientID != null) object.put("nsClientID", nsClientID);
         } catch (JSONException e) {
-            e.printStackTrace();
+            log.error("Unhandled exception", e);
         }
         return object;
     }
@@ -96,7 +98,7 @@ public class DbRequest {
             if (jsonObject.has("nsClientID"))
                 result.nsClientID = jsonObject.getString("nsClientID");
         } catch (JSONException e) {
-            e.printStackTrace();
+            log.error("Unhandled exception", e);
         }
         return result;
     }
