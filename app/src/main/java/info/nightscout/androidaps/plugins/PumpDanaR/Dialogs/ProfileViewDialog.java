@@ -1,8 +1,6 @@
 package info.nightscout.androidaps.plugins.PumpDanaR.Dialogs;
 
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.HandlerThread;
 import android.support.v4.app.DialogFragment;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -10,51 +8,39 @@ import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.TextView;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.util.Date;
-
 import info.nightscout.androidaps.MainApp;
 import info.nightscout.androidaps.R;
-import info.nightscout.androidaps.plugins.PumpDanaR.DanaRPlugin;
-import info.nightscout.androidaps.plugins.NSClientInternal.data.NSProfile;
+import info.nightscout.androidaps.data.Profile;
+import info.nightscout.androidaps.data.ProfileStore;
+import info.nightscout.androidaps.interfaces.ProfileInterface;
+import info.nightscout.androidaps.plugins.ConfigBuilder.ConfigBuilderPlugin;
+import info.nightscout.androidaps.plugins.Treatments.fragments.ProfileGraph;
 import info.nightscout.utils.DecimalFormatter;
 
 /**
  * Created by mike on 10.07.2016.
  */
 public class ProfileViewDialog extends DialogFragment {
-    private static Logger log = LoggerFactory.getLogger(ProfileViewDialog.class);
+    private  TextView noProfile;
+    private  TextView units;
+    private  TextView dia;
+    private  TextView activeProfile;
+    private  TextView ic;
+    private  TextView isf;
+    private  TextView basal;
+    private  TextView target;
+    private ProfileGraph basalGraph;
 
-    private static TextView noProfile;
-    private static TextView units;
-    private static TextView dia;
-    private static TextView activeProfile;
-    private static TextView ic;
-    private static TextView isf;
-    private static TextView basal;
-    private static TextView target;
 
-    private static Button refreshButton;
-
-    Handler mHandler;
-    static HandlerThread mHandlerThread;
-
-    NSProfile profile = null;
+    private  Button refreshButton;
 
     public ProfileViewDialog() {
-        mHandlerThread = new HandlerThread(ProfileViewDialog.class.getSimpleName());
-        mHandlerThread.start();
-
-        mHandler = new Handler(mHandlerThread.getLooper());
-        profile = ((DanaRPlugin) MainApp.getSpecificPlugin(DanaRPlugin.class)).getProfile();
     }
 
     @Override
     public View onCreateView(LayoutInflater inflater, ViewGroup container,
                              Bundle savedInstanceState) {
-        View layout = inflater.inflate(R.layout.nsprofileviewer_fragment, container, false);
+        View layout = inflater.inflate(R.layout.profileviewer_fragment, container, false);
 
         noProfile = (TextView) layout.findViewById(R.id.profileview_noprofile);
         units = (TextView) layout.findViewById(R.id.profileview_units);
@@ -69,17 +55,11 @@ public class ProfileViewDialog extends DialogFragment {
         refreshButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                mHandler.post(new Runnable() {
-                    @Override
-                    public void run() {
-                        DanaRPlugin.getDanaRPump().lastSettingsRead = new Date(0);
-                        DanaRPlugin.doConnect("ProfileViewDialog");
-                    }
-                });
+                ConfigBuilderPlugin.getPlugin().getCommandQueue().readStatus("ProfileViewDialog", null);
                 dismiss();
             }
         });
-
+        basalGraph = (ProfileGraph) layout.findViewById(R.id.basal_graph);
         setContent();
         return layout;
     }
@@ -91,19 +71,21 @@ public class ProfileViewDialog extends DialogFragment {
     }
 
     private void setContent() {
-        if (profile == null) {
-            noProfile.setVisibility(View.VISIBLE);
-            return;
-        } else {
+        ProfileStore store = ((ProfileInterface)ConfigBuilderPlugin.getPlugin().getActivePump()).getProfile();
+        if (store != null) {
             noProfile.setVisibility(View.GONE);
+            Profile profile = store.getDefaultProfile();
+            units.setText(profile.getUnits());
+            dia.setText(DecimalFormatter.to2Decimal(profile.getDia()) + " h");
+            activeProfile.setText(((ProfileInterface) ConfigBuilderPlugin.getPlugin().getActivePump()).getProfileName());
+            ic.setText(profile.getIcList());
+            isf.setText(profile.getIsfList());
+            basal.setText(profile.getBasalList());
+            target.setText(profile.getTargetList());
+            basalGraph.show(store.getDefaultProfile());
+        } else {
+            noProfile.setVisibility(View.VISIBLE);
         }
-        units.setText(profile.getUnits());
-        dia.setText(DecimalFormatter.to2Decimal(profile.getDia()) + " h");
-        activeProfile.setText(profile.getActiveProfile());
-        ic.setText(profile.getIcList());
-        isf.setText(profile.getIsfList());
-        basal.setText(profile.getBasalList());
-        target.setText(profile.getTargetList());
     }
 
 

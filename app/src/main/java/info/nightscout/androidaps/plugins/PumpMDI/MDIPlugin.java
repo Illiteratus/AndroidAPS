@@ -1,120 +1,66 @@
 package info.nightscout.androidaps.plugins.PumpMDI;
 
-import android.content.Context;
-
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Date;
-
 import info.nightscout.androidaps.BuildConfig;
-import info.nightscout.androidaps.Config;
 import info.nightscout.androidaps.MainApp;
 import info.nightscout.androidaps.R;
+import info.nightscout.androidaps.data.DetailedBolusInfo;
+import info.nightscout.androidaps.data.Profile;
 import info.nightscout.androidaps.data.PumpEnactResult;
-import info.nightscout.androidaps.db.TempBasal;
-import info.nightscout.androidaps.interfaces.InsulinInterface;
 import info.nightscout.androidaps.interfaces.PluginBase;
+import info.nightscout.androidaps.interfaces.PluginDescription;
+import info.nightscout.androidaps.interfaces.PluginType;
 import info.nightscout.androidaps.interfaces.PumpDescription;
 import info.nightscout.androidaps.interfaces.PumpInterface;
-import info.nightscout.androidaps.plugins.NSClientInternal.data.NSProfile;
+import info.nightscout.androidaps.logging.L;
+import info.nightscout.androidaps.plugins.Treatments.TreatmentsPlugin;
 import info.nightscout.utils.DateUtil;
 
 /**
  * Created by mike on 05.08.2016.
  */
-public class MDIPlugin implements PluginBase, PumpInterface {
+public class MDIPlugin extends PluginBase implements PumpInterface {
     private static Logger log = LoggerFactory.getLogger(MDIPlugin.class);
 
-    boolean fragmentEnabled = false;
-    boolean fragmentVisible = false;
+    private static MDIPlugin plugin = null;
 
-    PumpDescription pumpDescription = new PumpDescription();
+    public static MDIPlugin getPlugin() {
+        if (plugin == null)
+            plugin = new MDIPlugin();
+        return plugin;
+    }
 
-    public MDIPlugin() {
+    private PumpDescription pumpDescription = new PumpDescription();
+
+    private MDIPlugin() {
+        super(new PluginDescription()
+                .mainType(PluginType.PUMP)
+                .pluginName(R.string.mdi)
+                .description(R.string.description_pump_mdi)
+        );
         pumpDescription.isBolusCapable = true;
         pumpDescription.bolusStep = 0.5d;
 
         pumpDescription.isExtendedBolusCapable = false;
-        pumpDescription.extendedBolusStep = 0d;
-
         pumpDescription.isTempBasalCapable = false;
-        pumpDescription.lowTempBasalStyle = PumpDescription.NONE;
-        pumpDescription.highTempBasalStyle = PumpDescription.NONE;
-        pumpDescription.maxHighTempPercent = 0;
-        pumpDescription.maxHighTempAbsolute = 0;
-        pumpDescription.lowTempPercentStep = 0;
-        pumpDescription.lowTempAbsoluteStep = 0;
-        pumpDescription.lowTempPercentDuration = 0;
-        pumpDescription.lowTempAbsoluteDuration = 0;
-        pumpDescription.highTempPercentStep = 0;
-        pumpDescription.highTempAbsoluteStep = 0d;
-        pumpDescription.highTempPercentDuration = 0;
-        pumpDescription.highTempAbsoluteDuration = 0;
-
         pumpDescription.isSetBasalProfileCapable = false;
-        pumpDescription.basalStep = 0d;
-        pumpDescription.basalMinimumRate = 0d;
-
         pumpDescription.isRefillingCapable = false;
     }
 
     @Override
-    public String getFragmentClass() {
-        return MDIFragment.class.getName();
-    }
-
-    @Override
-    public String getName() {
-        return MainApp.instance().getString(R.string.mdi);
-    }
-
-    @Override
-    public String getNameShort() {
-        // use long name as fallback (not visible in tabs)
-        return getName();
-    }
-
-    @Override
-    public boolean isEnabled(int type) {
-        return type == PUMP && fragmentEnabled;
-    }
-
-    @Override
-    public boolean isVisibleInTabs(int type) {
+    public boolean isFakingTempsByExtendedBoluses() {
         return false;
     }
 
     @Override
-    public boolean canBeHidden(int type) {
-        return true;
-    }
-
-    @Override
-    public boolean hasFragment() {
-        return false;
-    }
-
-    @Override
-    public boolean showInList(int type) {
-        return true;
-    }
-
-    @Override
-    public void setFragmentEnabled(int type, boolean fragmentEnabled) {
-        if (type == PUMP) this.fragmentEnabled = fragmentEnabled;
-    }
-
-    @Override
-    public void setFragmentVisible(int type, boolean fragmentVisible) {
-        if (type == PUMP) this.fragmentVisible = fragmentVisible;
-    }
-
-    @Override
-    public int getType() {
-        return PluginBase.PUMP;
+    public PumpEnactResult loadTDDs() {
+        //no result, could read DB in the future?
+        PumpEnactResult result = new PumpEnactResult();
+        return result;
     }
 
     @Override
@@ -133,34 +79,56 @@ public class MDIPlugin implements PluginBase, PumpInterface {
     }
 
     @Override
-    public boolean isTempBasalInProgress() {
+    public boolean isConnected() {
+        return true;
+    }
+
+    @Override
+    public boolean isConnecting() {
         return false;
     }
 
     @Override
-    public boolean isExtendedBoluslInProgress() {
+    public boolean isHandshakeInProgress() {
         return false;
     }
 
     @Override
-    public int setNewBasalProfile(NSProfile profile) {
-        // Do nothing here. we are using MainApp.getConfigBuilder().getActiveProfile().getProfile();
-        return SUCCESS;
+    public void finishHandshaking() {
     }
 
     @Override
-    public boolean isThisProfileSet(NSProfile profile) {
+    public void connect(String reason) {
+    }
+
+    @Override
+    public void disconnect(String reason) {
+    }
+
+    @Override
+    public void stopConnecting() {
+    }
+
+    @Override
+    public void getPumpStatus() {
+    }
+
+    @Override
+    public PumpEnactResult setNewBasalProfile(Profile profile) {
+        // Do nothing here. we are using ConfigBuilderPlugin.getPlugin().getActiveProfile().getProfile();
+        PumpEnactResult result = new PumpEnactResult();
+        result.success = true;
+        return result;
+    }
+
+    @Override
+    public boolean isThisProfileSet(Profile profile) {
         return false;
     }
 
     @Override
-    public Date lastDataTime() {
-        return new Date();
-    }
-
-    @Override
-    public void refreshDataFromPump(String reason) {
-        // do nothing
+    public long lastDataTime() {
+        return System.currentTimeMillis();
     }
 
     @Override
@@ -169,37 +137,13 @@ public class MDIPlugin implements PluginBase, PumpInterface {
     }
 
     @Override
-    public double getTempBasalAbsoluteRate() {
-        return 0;
-    }
-
-    @Override
-    public TempBasal getTempBasal() {
-        return null;
-    }
-
-    @Override
-    public TempBasal getExtendedBolus() {
-        return null;
-    }
-
-    @Override
-    public double getTempBasalRemainingMinutes() {
-        return 0d;
-    }
-
-    @Override
-    public TempBasal getTempBasal(Date time) {
-        return null;
-    }
-
-    @Override
-    public PumpEnactResult deliverTreatment(InsulinInterface insulinType, Double insulin, Integer carbs, Context context) {
+    public PumpEnactResult deliverTreatment(DetailedBolusInfo detailedBolusInfo) {
         PumpEnactResult result = new PumpEnactResult();
         result.success = true;
-        result.bolusDelivered = insulin;
-        result.carbsDelivered = carbs;
-        result.comment = MainApp.instance().getString(R.string.virtualpump_resultok);
+        result.bolusDelivered = detailedBolusInfo.insulin;
+        result.carbsDelivered = detailedBolusInfo.carbs;
+        result.comment = MainApp.gs(R.string.virtualpump_resultok);
+        TreatmentsPlugin.getPlugin().addToHistoryTreatment(detailedBolusInfo, false);
         return result;
     }
 
@@ -208,21 +152,21 @@ public class MDIPlugin implements PluginBase, PumpInterface {
     }
 
     @Override
-    public PumpEnactResult setTempBasalAbsolute(Double absoluteRate, Integer durationInMinutes) {
+    public PumpEnactResult setTempBasalAbsolute(Double absoluteRate, Integer durationInMinutes, Profile profile, boolean enforceNew) {
         PumpEnactResult result = new PumpEnactResult();
         result.success = false;
-        result.comment = MainApp.instance().getString(R.string.pumperror);
-        if (Config.logPumpComm)
+        result.comment = MainApp.gs(R.string.pumperror);
+        if (L.isEnabled(L.PUMPCOMM))
             log.debug("Setting temp basal absolute: " + result);
         return result;
     }
 
     @Override
-    public PumpEnactResult setTempBasalPercent(Integer percent, Integer durationInMinutes) {
+    public PumpEnactResult setTempBasalPercent(Integer percent, Integer durationInMinutes, Profile profile, boolean enforceNew) {
         PumpEnactResult result = new PumpEnactResult();
         result.success = false;
-        result.comment = MainApp.instance().getString(R.string.pumperror);
-        if (Config.logPumpComm)
+        result.comment = MainApp.gs(R.string.pumperror);
+        if (L.isEnabled(L.PUMPCOMM))
             log.debug("Settings temp basal percent: " + result);
         return result;
     }
@@ -231,18 +175,18 @@ public class MDIPlugin implements PluginBase, PumpInterface {
     public PumpEnactResult setExtendedBolus(Double insulin, Integer durationInMinutes) {
         PumpEnactResult result = new PumpEnactResult();
         result.success = false;
-        result.comment = MainApp.instance().getString(R.string.pumperror);
-        if (Config.logPumpComm)
+        result.comment = MainApp.gs(R.string.pumperror);
+        if (L.isEnabled(L.PUMPCOMM))
             log.debug("Setting extended bolus: " + result);
         return result;
     }
 
     @Override
-    public PumpEnactResult cancelTempBasal() {
+    public PumpEnactResult cancelTempBasal(boolean force) {
         PumpEnactResult result = new PumpEnactResult();
         result.success = false;
-        result.comment = MainApp.instance().getString(R.string.pumperror);
-        if (Config.logPumpComm)
+        result.comment = MainApp.gs(R.string.pumperror);
+        if (L.isEnabled(L.PUMPCOMM))
             log.debug("Cancel temp basal: " + result);
         return result;
     }
@@ -251,14 +195,15 @@ public class MDIPlugin implements PluginBase, PumpInterface {
     public PumpEnactResult cancelExtendedBolus() {
         PumpEnactResult result = new PumpEnactResult();
         result.success = false;
-        result.comment = MainApp.instance().getString(R.string.pumperror);
-        if (Config.logPumpComm)
-            log.debug("Canceling extended basal: " + result);
+        result.comment = MainApp.gs(R.string.pumperror);
+        if (L.isEnabled(L.PUMPCOMM))
+            log.debug("Canceling extended bolus: " + result);
         return result;
     }
 
     @Override
-    public JSONObject getJSONStatus() {
+    public JSONObject getJSONStatus(Profile profile, String profileName) {
+        long now = System.currentTimeMillis();
         JSONObject pump = new JSONObject();
         JSONObject status = new JSONObject();
         JSONObject extended = new JSONObject();
@@ -266,14 +211,14 @@ public class MDIPlugin implements PluginBase, PumpInterface {
             status.put("status", "normal");
             extended.put("Version", BuildConfig.VERSION_NAME + "-" + BuildConfig.BUILDVERSION);
             try {
-                extended.put("ActiveProfile", MainApp.getConfigBuilder().getActiveProfile().getProfile().getActiveProfile());
+                extended.put("ActiveProfile", profileName);
             } catch (Exception e) {
             }
-            status.put("timestamp", DateUtil.toISOString(new Date()));
+            status.put("timestamp", DateUtil.toISOString(now));
 
             pump.put("status", status);
             pump.put("extended", extended);
-            pump.put("clock", DateUtil.toISOString(new Date()));
+            pump.put("clock", DateUtil.toISOString(now));
         } catch (JSONException e) {
         }
         return pump;

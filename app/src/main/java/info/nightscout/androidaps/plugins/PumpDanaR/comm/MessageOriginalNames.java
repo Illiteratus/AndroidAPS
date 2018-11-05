@@ -5,16 +5,18 @@ import org.slf4j.LoggerFactory;
 
 import java.util.HashMap;
 
+import info.nightscout.androidaps.logging.L;
+
 /**
  * Created by mike on 28.05.2016.
  */
 public class MessageOriginalNames {
-    private static Logger log = LoggerFactory.getLogger(MessageOriginalNames.class);
+    private static Logger log = LoggerFactory.getLogger(L.PUMPCOMM);
 
-    public static HashMap<Integer,String> messageNames;
+    private static HashMap<Integer, String> messageNames;
 
     static {
-        messageNames = new HashMap<Integer,String>();
+        messageNames = new HashMap<>();
 
         messageNames.put(0x3001, "CMD_CONNECT");
         messageNames.put(0x3002, "CMD_DISCONNECT");
@@ -150,13 +152,19 @@ public class MessageOriginalNames {
         messageNames.put(0xF0F3, "CMD_PUMP_TIMECHANGE_CLEAR");
         messageNames.put(0x43F2, "CMD_HISTORY_DATEOVER_ALL");
         messageNames.put(0x4300, "CMD_HISTORY_DATEOVER_DONE");
+
+        messageNames.put(0xE001, "CMD_PUMPSTATUS_APS");
+        messageNames.put(0xE002, "CMD_PUMPSET_APSTEMP");
+        messageNames.put(0xE003, "CMD_GET_HISTORY");
+        messageNames.put(0xE004, "CMD_SET_HISTORY_ENTRY");
     }
+
 
     public static String getName(Integer command) {
         if (messageNames.containsKey(command))
             return messageNames.get(command);
         else {
-            log.debug("Unknown command: " + String.format("%04X", command));
+            log.error("Unknown command: " + String.format("%04X", command));
             return "UNKNOWN_COMMAND";
         }
     }
